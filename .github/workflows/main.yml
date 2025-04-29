@@ -38,31 +38,27 @@ jobs:
         git checkout ${{ github.event.inputs.target_branch }}
         git pull origin ${{ github.event.inputs.target_branch }}
 
-    - name: Create temp branch
-      run: |
-        TIMESTAMP=$(date +%s)
-        export BRANCH_NAME=cherry-pick-${{ github.event.inputs.commit_sha }}-$TIMESTAMP
-        echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
-        git checkout -b $BRANCH_NAME
-
     - name: Try cherry-pick commit
       id: cherry
       continue-on-error: true
       run: |
         git cherry-pick ${{ github.event.inputs.commit_sha }}
 
-    - name: Commit conflict markers if needed
+    - name: Handle conflict and create PR
       if: steps.cherry.outcome == 'failure'
       run: |
-        echo "Cherry-pick failed. Keeping conflict markers and committing partial changes..."
+        echo "🧩 Cherry-pick conflict detected. Creating temp branch for manual resolution..."
+        TIMESTAMP=$(date +%s)
+        BRANCH_NAME=cherry-pick-${{ github.event.inputs.commit_sha }}-$TIMESTAMP
+        echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+
+        git checkout -b "$BRANCH_NAME"
         git add .
         git commit -m "Conflict during cherry-pick of ${{ github.event.inputs.commit_sha }}"
-
-    - name: Push branch
-      run: |
-        git push origin $BRANCH_NAME
+        git push origin "$BRANCH_NAME"
 
     - name: Create pull request
+      if: steps.cherry.outcome == 'failure'
       uses: peter-evans/create-pull-request@v5
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
