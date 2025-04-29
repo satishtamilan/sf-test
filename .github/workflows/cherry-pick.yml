@@ -1,0 +1,50 @@
+name: Cherry-Pick Commit
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: 'Branch to cherry-pick from'
+        required: true
+        default: 'feature-branch'
+      target_branch:
+        description: 'Branch to cherry-pick to'
+        required: true
+        default: 'main'
+      commit_sha:
+        description: 'Commit SHA to cherry-pick'
+        required: true
+
+jobs:
+  cherry-pick:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Required to access full commit history
+
+    - name: Set up Git
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Fetch all branches
+      run: git fetch origin
+
+    - name: Checkout target branch
+      run: |
+        git checkout ${{ github.event.inputs.target_branch }}
+        git pull origin ${{ github.event.inputs.target_branch }}
+
+    - name: Cherry-pick commit
+      run: |
+        set -e
+        git cherry-pick ${{ github.event.inputs.commit_sha }}
+
+    - name: Push changes
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        git push origin ${{ github.event.inputs.target_branch }}
