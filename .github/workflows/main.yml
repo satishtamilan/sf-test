@@ -11,8 +11,8 @@ on:
         description: 'Branch to cherry-pick to'
         required: true
         default: 'main'
-      commit_sha:
-        description: 'Commit SHA to cherry-pick'
+      commit_shas:
+        description: 'Space-separated list of commit SHAs to cherry-pick'
         required: true
 
 jobs:
@@ -38,38 +38,47 @@ jobs:
         git checkout ${{ github.event.inputs.target_branch }}
         git pull origin ${{ github.event.inputs.target_branch }}
 
-    - name: Try cherry-pick commit
+    - name: Cherry-pick commits
       id: cherry
       continue-on-error: true
       run: |
-        git cherry-pick ${{ github.event.inputs.commit_sha }}
+        set -e
+        for sha in ${{ github.event.inputs.commit_shas }}; do
+          echo "🔧 Cherry-picking commit $sha"
+          if ! git cherry-pick $sha; then
+            echo "❌ Conflict on $sha"
+            echo "CONFLICTED_SHA=$sha" >> $GITHUB_ENV
+            echo "CONFLICT=true" >> $GITHUB_ENV
+            exit 1
+          fi
+        done
+        echo "✅ All commits cherry-picked successfully"
 
     - name: Handle conflict and create PR
-      if: steps.cherry.outcome == 'failure'
+      if: env.CONFLICT == 'true'
       run: |
-        echo "🧩 Cherry-pick conflict detected. Creating temp branch for manual resolution..."
         TIMESTAMP=$(date +%s)
-        BRANCH_NAME=cherry-pick-${{ github.event.inputs.commit_sha }}-$TIMESTAMP
+        BRANCH_NAME=cherry-pick-${{ env.CONFLICTED_SHA }}-$TIMESTAMP
         echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
 
-        git checkout -b "$BRANCH_NAME"
+        git branch "$BRANCH_NAME"
+        git checkout "$BRANCH_NAME"
+
         git add .
-        git commit -m "Conflict during cherry-pick of ${{ github.event.inputs.commit_sha }}"
+        git commit -m "Conflict during cherry-pick of ${{ env.CONFLICTED_SHA }}"
         git push origin "$BRANCH_NAME"
 
     - name: Create pull request
-      if: steps.cherry.outcome == 'failure'
+      if: env.CONFLICT == 'true'
       uses: peter-evans/create-pull-request@v5
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         branch: ${{ env.BRANCH_NAME }}
         base: ${{ github.event.inputs.target_branch }}
-        title: "🧩 Cherry-pick ${{ github.event.inputs.commit_sha }} with conflict"
+        title: "🧩 Cherry-pick conflict on ${{ env.CONFLICTED_SHA }}"
         body: |
-          This PR was auto-created due to a cherry-pick conflict.
+          This PR was auto-created due to a cherry-pick conflict on commit:
 
-          Please resolve the conflict in `README.md` (or other files), commit the resolution, and merge.
+          `${{ env.CONFLICTED_SHA }}`
 
-          - Commit: `${{ github.event.inputs.commit_sha }}`
-          - Source Branch: `${{ github.event.inputs.source_branch}}`
-          - Target Branch: `${{ github.event.inputs.target_branch}}`
+          Please resolve the conflict and merge. Other commits were not applied.
