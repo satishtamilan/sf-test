@@ -43,6 +43,15 @@ jobs:
         set -e
         git cherry-pick ${{ github.event.inputs.commit_sha }}
 
+    - name: Cherry-pick commit (with conflict detection)
+      run: |
+        set -e
+        git cherry-pick ${{ github.event.inputs.commit_sha }} || {
+          echo "❌ Cherry-pick failed due to conflict. Aborting..."
+          git cherry-pick --abort
+          exit 1
+        }
+
     - name: Push changes
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
