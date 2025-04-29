@@ -38,11 +38,6 @@ jobs:
         git checkout ${{ github.event.inputs.target_branch }}
         git pull origin ${{ github.event.inputs.target_branch }}
 
-    - name: Cherry-pick commit
-      run: |
-        set -e
-        git cherry-pick ${{ github.event.inputs.commit_sha }}
-
     - name: Cherry-pick commit (with conflict detection)
       run: |
         set -e
