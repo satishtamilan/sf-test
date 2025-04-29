@@ -54,6 +54,12 @@ jobs:
         done
         echo "✅ All commits cherry-picked successfully"
 
+    - name: Push cherry-picked changes to target branch
+      if: steps.cherry.outcome == 'success'
+      run: |
+        git push origin ${{ github.event.inputs.target_branch }}
+        echo "✅ Changes successfully pushed to ${{ github.event.inputs.target_branch }}"
+
     - name: Handle conflict and create PR
       if: env.CONFLICT == 'true'
       run: |
