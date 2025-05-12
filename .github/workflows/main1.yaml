@@ -80,7 +80,7 @@ jobs:
             echo "🧨 Cherry-pick encountered conflicts, as expected"
             
             # Create a custom message file for the conflict commit
-            cat > commit_message.txt << EOL
+            cat > commit_message.txt << 'EOL'
             Cherry-pick ${{ github.event.inputs.commit_hash }} with conflicts
             
             This commit contains the conflicts from cherry-picking
