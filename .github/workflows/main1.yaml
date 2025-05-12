@@ -74,19 +74,28 @@ jobs:
         TIMESTAMP=$(date +%s)
         CONFLICT_BRANCH=cherry-pick-${{ env.CONFLICTED_SHA }}-$TIMESTAMP
         echo "BRANCH_NAME=$CONFLICT_BRANCH" >> $GITHUB_ENV
-
-        # Clean up any cherry-pick state just in case
+    
+        # Abort previous cherry-pick if any
         git cherry-pick --abort || true
+    
+        # Create a new branch from target
         git checkout -b "$CONFLICT_BRANCH" origin/${{ github.event.inputs.target_branch }}
-
+    
         echo "🔁 Re-attempting cherry-pick of ${{ env.CONFLICTED_SHA }} on new branch"
-        if ! git cherry-pick ${{ env.CONFLICTED_SHA }}; then
-          echo "🧨 Conflict occurred, committing unresolved state"
-          git add -u
-          git commit -m "⚠️ Conflict while cherry-picking ${{ env.CONFLICTED_SHA }} - manual resolution required"
-        fi
-
+        git cherry-pick --no-commit ${{ env.CONFLICTED_SHA }} || true
+    
+        echo "🧨 Conflict occurred, committing unresolved state"
+    
+        # Stage everything including conflicts (so commit includes <<<<<<< markers)
+        git add -A
+    
+        # Create a commit with unresolved conflicts
+        git commit -m "⚠️ Conflict while cherry-picking ${{ env.CONFLICTED_SHA }} - manual resolution required"
+    
+        # Push the new branch
         git push origin "$CONFLICT_BRANCH"
+
+
 
     - name: Create pull request for conflict resolution
       if: env.CONFLICT == 'true'
