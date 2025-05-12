@@ -1,4 +1,4 @@
-name: Cherry-pick with PR on Conflict Latest
+name: Cherry-pick with PR on Conflict latest
 
 on:
   workflow_dispatch:
@@ -75,14 +75,17 @@ jobs:
         CONFLICT_BRANCH=cherry-pick-${{ env.CONFLICTED_SHA }}-$TIMESTAMP
         echo "BRANCH_NAME=$CONFLICT_BRANCH" >> $GITHUB_ENV
 
-        git cherry-pick --abort
+        # Clean up any cherry-pick state just in case
+        git cherry-pick --abort || true
         git checkout -b "$CONFLICT_BRANCH" origin/${{ github.event.inputs.target_branch }}
 
-        echo "🔁 Re-attempting cherry-pick ${{ env.CONFLICTED_SHA }} on new branch"
-        git cherry-pick ${{ env.CONFLICTED_SHA }} || echo "🧨 Conflict expected, committing conflict state"
+        echo "🔁 Re-attempting cherry-pick of ${{ env.CONFLICTED_SHA }} on new branch"
+        if ! git cherry-pick ${{ env.CONFLICTED_SHA }}; then
+          echo "🧨 Conflict occurred, committing unresolved state"
+          git add -u
+          git commit -m "⚠️ Conflict while cherry-picking ${{ env.CONFLICTED_SHA }} - manual resolution required"
+        fi
 
-        git add -u
-        git commit -m "⚠️ Conflict during cherry-pick of ${{ env.CONFLICTED_SHA }} - manual resolution required"
         git push origin "$CONFLICT_BRANCH"
 
     - name: Create pull request for conflict resolution
@@ -96,4 +99,4 @@ jobs:
         body: |
           ⚠️ A conflict occurred while cherry-picking commit `${{ env.CONFLICTED_SHA }}` into `${{ github.event.inputs.target_branch }}`.
 
-          This PR contains the conflict. Please resolve it manually and merge.
+          This PR contains the unresolved conflict. Please resolve it manually and merge.
