@@ -79,20 +79,15 @@ jobs:
             # We expect this to fail with conflicts
             echo "🧨 Cherry-pick encountered conflicts, as expected"
             
-            # Create commit message directly without heredoc
-            COMMIT_MSG="Cherry-pick ${{ github.event.inputs.commit_hash }} with conflicts
-
-This commit contains the conflicts from cherry-picking
-${{ github.event.inputs.commit_hash }} from ${{ github.event.inputs.source_branch }}
-
-These conflicts need to be resolved manually."
+            # Store variables for easier reference
+            COMMIT_HASH="${{ github.event.inputs.commit_hash }}"
+            SOURCE_BRANCH="${{ github.event.inputs.source_branch }}"
             
             # Add all files including conflicts
             git add --all
             
-            # Commit with the conflict markers
-            export GIT_EDITOR=true  # Skip editor for merge commit message
-            git -c core.editor=true commit -m "$COMMIT_MSG" || echo "Failed to commit, but continuing"
+            # Commit with the conflict markers - use a simple message to avoid syntax issues
+            git -c core.editor=true commit -m "Cherry-pick ${COMMIT_HASH} with conflicts" -m "This commit contains conflicts that need manual resolution" || echo "Failed to commit, but continuing"
             
             echo "Committed conflicts to the branch"
           else
