@@ -1,111 +1,103 @@
-name: Cherry-pick with PR on Conflict latest
+name: Cherry Pick Workflow
 
 on:
+  # Triggered manually with inputs
   workflow_dispatch:
     inputs:
+      commit_hash:
+        description: 'Commit hash to cherry-pick'
+        required: true
       source_branch:
-        description: 'Branch to cherry-pick from'
+        description: 'Source branch (where the commit is located)'
         required: true
-        default: 'feature-branch'
       target_branch:
-        description: 'Branch to cherry-pick to'
+        description: 'Target branch (where to cherry-pick to)'
         required: true
-        default: 'main'
-      commit_shas:
-        description: 'Space-separated list of commit SHAs to cherry-pick'
+      pr_title:
+        description: 'PR title (for conflict resolution)'
         required: true
-
-permissions:
-  contents: write
-  pull-requests: write
+        default: 'Cherry-pick with conflicts'
+      pr_body:
+        description: 'PR body (for conflict resolution)'
+        required: false
+        default: 'This PR was created automatically to resolve cherry-pick conflicts'
 
 jobs:
-  cherry-pick:
+  cherry_pick:
     runs-on: ubuntu-latest
-
+    
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - name: Set up Git
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-
-    - name: Fetch all branches
-      run: git fetch origin
-
-    - name: Checkout target branch
-      run: |
-        git checkout ${{ github.event.inputs.target_branch }}
-        git pull origin ${{ github.event.inputs.target_branch }}
-
-    - name: Cherry-pick commits
-      id: cherry
-      run: |
-        CONFLICT=false
-        for sha in ${{ github.event.inputs.commit_shas }}; do
-          echo "🔧 Attempting to cherry-pick $sha"
-          if ! git cherry-pick $sha; then
-            echo "❌ Conflict detected on commit $sha"
-            echo "CONFLICTED_SHA=$sha" >> $GITHUB_ENV
-            echo "CONFLICT=true" >> $GITHUB_ENV
-            CONFLICT=true
-            break
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Set Git user
+        run: |
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'github-actions@github.com'
+          
+      - name: Setup branch
+        run: |
+          # Checkout the target branch
+          git checkout ${{ github.event.inputs.target_branch }}
+          git pull origin ${{ github.event.inputs.target_branch }}
+          
+      - name: Attempt Cherry Pick
+        id: cherry_pick
+        run: |
+          # Try to cherry-pick
+          if git cherry-pick ${{ github.event.inputs.commit_hash }}; then
+            echo "Cherry-pick successful. Pushing changes..."
+            git push origin ${{ github.event.inputs.target_branch }}
+            echo "cherry_pick_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "Cherry-pick encountered conflicts. Will create PR..."
+            # Abort the cherry-pick that's in conflict
+            git cherry-pick --abort
+            echo "cherry_pick_status=conflict" >> $GITHUB_OUTPUT
           fi
-        done
+        continue-on-error: true
+        
+      - name: Handle Conflicts with PR
+        if: steps.cherry_pick.outputs.cherry_pick_status == 'conflict'
+        run: |
+          # Create a new branch for the conflicted cherry-pick
+          CONFLICT_BRANCH="cherry-pick-${{ github.event.inputs.commit_hash }}-to-${{ github.event.inputs.target_branch }}"
+          git checkout -b $CONFLICT_BRANCH ${{ github.event.inputs.target_branch }}
+          
+          # Try cherry-pick but with --no-commit to handle conflicts later
+          if ! git cherry-pick --no-commit ${{ github.event.inputs.commit_hash }}; then
+            echo "Cherry-pick has conflicts. Creating branch with conflicts..."
+            
+            # Add all files including those with conflicts
+            git add .
+            
+            # Create a commit with conflicts marked in files
+            git commit -m "Cherry-pick ${{ github.event.inputs.commit_hash }} with conflicts"
+            
+            # Push the branch with conflicts
+            git push origin $CONFLICT_BRANCH
+            
+            # Create PR using GitHub CLI
+            gh pr create \
+              --base ${{ github.event.inputs.target_branch }} \
+              --head $CONFLICT_BRANCH \
+              --title "${{ github.event.inputs.pr_title }}" \
+              --body "${{ github.event.inputs.pr_body }}
+              
+              This PR contains cherry-pick of commit ${{ github.event.inputs.commit_hash }} from ${{ github.event.inputs.source_branch }} to ${{ github.event.inputs.target_branch }}.
+              
+              The cherry-pick operation resulted in conflicts that need manual resolution."
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-        if [ "$CONFLICT" = false ]; then
-          echo "✅ All commits cherry-picked successfully"
-          echo "CHERRY_SUCCESS=true" >> $GITHUB_ENV
-        fi
-
-    - name: Push cherry-picked changes to target branch
-      if: env.CHERRY_SUCCESS == 'true'
-      run: |
-        git push origin ${{ github.event.inputs.target_branch }}
-        echo "✅ Changes pushed to ${{ github.event.inputs.target_branch }}"
-
-    - name: Create new branch with conflicted cherry-pick
-      if: env.CONFLICT == 'true'
-      run: |
-        TIMESTAMP=$(date +%s)
-        CONFLICT_BRANCH=cherry-pick-${{ env.CONFLICTED_SHA }}-$TIMESTAMP
-        echo "BRANCH_NAME=$CONFLICT_BRANCH" >> $GITHUB_ENV
-    
-        # Abort previous cherry-pick if any
-        git cherry-pick --abort || true
-    
-        # Create a new branch from target
-        git checkout -b "$CONFLICT_BRANCH" origin/${{ github.event.inputs.target_branch }}
-    
-        echo "🔁 Re-attempting cherry-pick of ${{ env.CONFLICTED_SHA }} on new branch"
-        git cherry-pick --no-commit ${{ env.CONFLICTED_SHA }} || true
-    
-        echo "🧨 Conflict occurred, committing unresolved state"
-    
-        # Stage everything including conflicts (so commit includes <<<<<<< markers)
-        git add -A
-    
-        # Create a commit with unresolved conflicts
-        git commit -m "⚠️ Conflict while cherry-picking ${{ env.CONFLICTED_SHA }} - manual resolution required"
-    
-        # Push the new branch
-        git push origin "$CONFLICT_BRANCH"
-
-
-
-    - name: Create pull request for conflict resolution
-      if: env.CONFLICT == 'true'
-      uses: peter-evans/create-pull-request@v5
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        branch: ${{ env.BRANCH_NAME }}
-        base: ${{ github.event.inputs.target_branch }}
-        title: "🧩 Cherry-pick conflict on ${{ env.CONFLICTED_SHA }}"
-        body: |
-          ⚠️ A conflict occurred while cherry-picking commit `${{ env.CONFLICTED_SHA }}` into `${{ github.event.inputs.target_branch }}`.
-
-          This PR contains the unresolved conflict. Please resolve it manually and merge.
+      - name: Summary
+        run: |
+          if [ "${{ steps.cherry_pick.outputs.cherry_pick_status }}" == "success" ]; then
+            echo "✅ Cherry-pick completed successfully and pushed to ${{ github.event.inputs.target_branch }}"
+          else
+            echo "⚠️ Cherry-pick had conflicts. Created PR for manual resolution."
+          fi
